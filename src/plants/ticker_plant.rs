@@ -51,6 +51,12 @@ pub enum TickerPlantCommand {
         request_type: Request,
         response_sender: oneshot::Sender<Result<Vec<RithmicResponse>, String>>,
     },
+    SubscribeOrderBook {
+        symbol: String,
+        exchange: String,
+        request_type: Request,
+        response_sender: oneshot::Sender<Result<Vec<RithmicResponse>, String>>,
+    },
 }
 
 /// The RithmicTickerPlant provides access to real-time market data.
@@ -373,6 +379,28 @@ impl PlantActor for TickerPlant {
                     .await
                     .unwrap();
             }
+            TickerPlantCommand::SubscribeOrderBook {
+                symbol,
+                exchange,
+                request_type,
+                response_sender
+            } => {
+                let (sub_buf, id) = self.rithmic_sender_api.request_depth_by_order_update(
+                    &symbol,
+                    &exchange,
+                    request_type,
+                );
+
+                self.request_handler.register_request(RithmicRequest {
+                    request_id: id,
+                    responder: response_sender,
+                });
+
+                self.rithmic_sender
+                    .send(Message::Binary(sub_buf.into()))
+                    .await
+                    .unwrap();
+            }
         }
     }
 }
@@ -464,13 +492,28 @@ impl RithmicTickerPlantHandle {
     ///
     /// # Returns
     /// The subscription response or an error message
-    pub async fn subscribe(&self, symbol: &str, exchange: &str, fields: Vec<UpdateBits>) -> Result<RithmicResponse, String> {
+    pub async fn subscribe(&self, symbol: &str, exchange: &str) -> Result<RithmicResponse, String> {
         let (tx, rx) = oneshot::channel::<Result<Vec<RithmicResponse>, String>>();
 
         let command = TickerPlantCommand::Subscribe {
             symbol: symbol.to_string(),
             exchange: exchange.to_string(),
-            fields,
+            fields: vec![UpdateBits::LastTrade, UpdateBits::Bbo],
+            request_type: Request::Subscribe,
+            response_sender: tx,
+        };
+
+        let _ = self.sender.send(command).await;
+
+        Ok(rx.await.unwrap().unwrap().remove(0))
+    }
+
+    pub async fn subscribe_order_book(&self, symbol: &str, exchange: &str) -> Result<RithmicResponse, String> {
+        let (tx, rx) = oneshot::channel::<Result<Vec<RithmicResponse>, String>>();
+
+        let command = TickerPlantCommand::SubscribeOrderBook {
+            symbol: symbol.to_string(),
+            exchange: exchange.to_string(),
             request_type: Request::Subscribe,
             response_sender: tx,
         };
