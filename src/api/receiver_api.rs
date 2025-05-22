@@ -2,20 +2,7 @@ use prost::{Message, bytes::Bytes};
 use std::io::Cursor;
 use tracing::{Level, event};
 
-use crate::rti::{
-    AccountPnLPositionUpdate, BestBidOffer, BracketUpdates, ExchangeOrderNotification,
-    ForcedLogout, InstrumentPnLPositionUpdate, LastTrade, MessageType, Reject, ResponseAccountList,
-    ResponseAccountRmsInfo, ResponseBracketOrder, ResponseCancelAllOrders, ResponseCancelOrder,
-    ResponseExitPosition, ResponseHeartbeat, ResponseLogin, ResponseLogout,
-    ResponseMarketDataUpdate, ResponseModifyOrder, ResponseNewOrder, ResponsePnLPositionSnapshot,
-    ResponsePnLPositionUpdates, ResponseProductRmsInfo, ResponseRithmicSystemInfo,
-    ResponseSearchSymbols, ResponseShowBracketStops, ResponseShowBrackets,
-    ResponseShowOrderHistory, ResponseShowOrderHistoryDates, ResponseShowOrderHistoryDetail,
-    ResponseShowOrderHistorySummary, ResponseShowOrders, ResponseSubscribeForOrderUpdates,
-    ResponseSubscribeToBracketUpdates, ResponseTickBarReplay, ResponseTimeBarReplay,
-    ResponseTradeRoutes, ResponseUpdateStopBracketLevel, ResponseUpdateTargetBracketLevel,
-    RithmicOrderNotification, TickBar, TimeBar, messages::RithmicMessage,
-};
+use crate::rti::{AccountPnLPositionUpdate, BestBidOffer, BracketUpdates, ExchangeOrderNotification, ForcedLogout, InstrumentPnLPositionUpdate, LastTrade, MessageType, Reject, ResponseAccountList, ResponseAccountRmsInfo, ResponseBracketOrder, ResponseCancelAllOrders, ResponseCancelOrder, ResponseExitPosition, ResponseHeartbeat, ResponseLogin, ResponseLogout, ResponseMarketDataUpdate, ResponseModifyOrder, ResponseNewOrder, ResponsePnLPositionSnapshot, ResponsePnLPositionUpdates, ResponseProductRmsInfo, ResponseRithmicSystemInfo, ResponseSearchSymbols, ResponseShowBracketStops, ResponseShowBrackets, ResponseShowOrderHistory, ResponseShowOrderHistoryDates, ResponseShowOrderHistoryDetail, ResponseShowOrderHistorySummary, ResponseShowOrders, ResponseSubscribeForOrderUpdates, ResponseSubscribeToBracketUpdates, ResponseTickBarReplay, ResponseTimeBarReplay, ResponseTradeRoutes, ResponseUpdateStopBracketLevel, ResponseUpdateTargetBracketLevel, RithmicOrderNotification, TickBar, TimeBar, messages::RithmicMessage, OrderBook};
 
 #[derive(Debug, Clone)]
 pub struct RithmicResponse {
@@ -169,6 +156,19 @@ impl RithmicReceiverApi {
                 RithmicResponse {
                     request_id: "".to_string(),
                     message: RithmicMessage::BestBidOffer(resp),
+                    is_update: true,
+                    has_more: false,
+                    multi_response: false,
+                    error: None,
+                    source: self.source.clone(),
+                }
+            }
+            156 => {
+                let resp = OrderBook::decode(&mut Cursor::new(&data[4..])).unwrap();
+
+                RithmicResponse {
+                    request_id: "".to_string(),
+                    message: RithmicMessage::OrderBook(resp),
                     is_update: true,
                     has_more: false,
                     multi_response: false,

@@ -460,16 +460,17 @@ impl RithmicTickerPlantHandle {
     /// # Arguments
     /// * `symbol` - The trading symbol (e.g., "ESM1")
     /// * `exchange` - The exchange code (e.g., "CME")
+    /// * `fields` - The fields to subscribe to (e.g., last trades, best bid/offer) ex: vec![UpdateBits::LastTrade, UpdateBits::Bbo],
     ///
     /// # Returns
     /// The subscription response or an error message
-    pub async fn subscribe(&self, symbol: &str, exchange: &str) -> Result<RithmicResponse, String> {
+    pub async fn subscribe(&self, symbol: &str, exchange: &str, fields: Vec<UpdateBits>) -> Result<RithmicResponse, String> {
         let (tx, rx) = oneshot::channel::<Result<Vec<RithmicResponse>, String>>();
 
         let command = TickerPlantCommand::Subscribe {
             symbol: symbol.to_string(),
             exchange: exchange.to_string(),
-            fields: vec![UpdateBits::LastTrade, UpdateBits::Bbo],
+            fields,
             request_type: Request::Subscribe,
             response_sender: tx,
         };
