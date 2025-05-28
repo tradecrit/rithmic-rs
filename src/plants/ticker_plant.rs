@@ -563,7 +563,7 @@ impl RithmicTickerPlantHandle {
 
         let _ = self.sender.send(command).await;
 
-        let responses = rx.await.unwrap()?; // fully collected
+        let responses = rx.await.unwrap()?;
 
         Ok(responses)
     }

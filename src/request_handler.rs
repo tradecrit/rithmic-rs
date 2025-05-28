@@ -4,6 +4,7 @@ use tokio::sync::oneshot;
 use tracing::{event, Level};
 
 use crate::{api::receiver_api::RithmicResponse, rti::messages::RithmicMessage};
+use crate::rti::depth_by_order::TransactionType;
 
 #[derive(Debug)]
 pub struct RithmicRequest {
@@ -15,13 +16,23 @@ pub struct RithmicRequest {
 pub struct RithmicRequestHandler {
     handle_map: HashMap<String, oneshot::Sender<Result<Vec<RithmicResponse>, String>>>,
     response_vec_map: HashMap<String, Vec<RithmicResponse>>,
+    snapshot_side_map: HashMap<String, (bool, bool)>, // (has_bid, has_ask)
 }
+
+#[derive(Default)]
+struct SnapshotAccumulator {
+    responses: Vec<RithmicResponse>,
+    has_bid: bool,
+    has_ask: bool,
+}
+
 
 impl RithmicRequestHandler {
     pub fn new() -> Self {
         Self {
             handle_map: HashMap::new(),
             response_vec_map: HashMap::new(),
+            snapshot_side_map: HashMap::new(),
         }
     }
 
@@ -36,31 +47,60 @@ impl RithmicRequestHandler {
             _ => {
                 if !response.multi_response {
                     if let Some(responder) = self.handle_map.remove(&response.request_id) {
-                        responder.send(Ok(vec![response])).unwrap();
+                        let _ = responder.send(Ok(vec![response]));
                     } else {
                         event!(Level::ERROR, "No responder found for response: {:#?}", response);
                     }
-                } else {
-                    // If response has more, we store it in a vector and wait for more messages
-                    if response.has_more {
-                        self.response_vec_map
-                            .entry(response.request_id.clone())
-                            .or_default()
-                            .push(response);
-                    } else if let Some(responder) = self.handle_map.remove(&response.request_id) {
-                        let response_vec = match self.response_vec_map.remove(&response.request_id)
-                        {
-                            Some(mut vec) => {
-                                vec.push(response);
-                                vec
-                            }
-                            None => {
-                                vec![response]
-                            }
-                        };
-                        responder.send(Ok(response_vec)).unwrap();
+                    return;
+                }
+
+                // Accumulate response part
+                let responses = self
+                    .response_vec_map
+                    .entry(response.request_id.clone())
+                    .or_default();
+
+                responses.push(response.clone());
+
+                // Update snapshot-side tracking if applicable
+                if let RithmicMessage::ResponseDepthByOrderSnapshot(snap) = &response.message {
+                    let entry = self
+                        .snapshot_side_map
+                        .entry(response.request_id.clone())
+                        .or_insert((false, false));
+
+                    let transaction_type = snap.depth_side.as_ref().and_then(|side| {
+                        TransactionType::try_from(*side).ok()
+                    });
+
+                    match transaction_type {
+                        Some(TransactionType::Buy) => entry.0 = true, // has_bid
+                        Some(TransactionType::Sell) => entry.1 = true, // has_ask
+                        None => {
+                            event!(Level::WARN, "Invalid or missing depth side in snapshot: {:?}", snap);
+                        }
+                    }
+                }
+
+                // Final part
+                if !response.has_more {
+                    let can_send = match &response.message {
+                        RithmicMessage::ResponseDepthByOrderSnapshot(_) => {
+                            matches!(self.snapshot_side_map.get(&response.request_id), Some((true, true)))
+                        }
+                        _ => true, // Non-snapshot messages are not delayed
+                    };
+
+                    if can_send {
+                        if let Some(responder) = self.handle_map.remove(&response.request_id) {
+                            let responses = self.response_vec_map.remove(&response.request_id).unwrap_or_default();
+                            let _ = responder.send(Ok(responses));
+                            self.snapshot_side_map.remove(&response.request_id);
+                        } else {
+                            event!(Level::ERROR, "No responder found for response: {:#?}", response);
+                        }
                     } else {
-                        event!(Level::ERROR, "No responder found for response: {:#?}", response);
+                        event!(Level::WARN, "Delaying response for snapshot until both sides received: {:?}", response.request_id);
                     }
                 }
             }
