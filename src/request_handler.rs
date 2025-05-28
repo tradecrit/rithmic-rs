@@ -14,7 +14,6 @@ pub struct RithmicRequest {
 pub struct RithmicRequestHandler {
     handle_map: HashMap<String, oneshot::Sender<Result<Vec<RithmicResponse>, String>>>,
     response_vec_map: HashMap<String, Vec<RithmicResponse>>,
-    groups_complete: i32,
 }
 
 impl RithmicRequestHandler {
@@ -22,7 +21,6 @@ impl RithmicRequestHandler {
         Self {
             handle_map: HashMap::new(),
             response_vec_map: HashMap::new(),
-            groups_complete: 0
         }
     }
 
@@ -45,9 +43,6 @@ impl RithmicRequestHandler {
                     return;
                 }
 
-
-                tracing::info!("Response received: {:#?}", response);
-
                 // Case 2: Multi-message response (grouped)
                 let responses = self
                     .response_vec_map
@@ -56,19 +51,8 @@ impl RithmicRequestHandler {
 
                 responses.push(response.clone());
 
-                if !response.has_more {
-                    if &self.groups_complete < &response.message_count {
-                        tracing::info!("Message count: {}, current complete: {}", response.message_count, self.groups_complete);
-                        self.groups_complete += 1;
-                    } else {
-                        tracing::warn!("Received more messages than expected for request ID: {}", response.request_id);
-                    }
-                }
-
                 // Only proceed if this was the last message in the group
-                if !response.has_more && self.groups_complete == response.message_count {
-                    tracing::info!("Received more messages than expected for request ID: {}", response.request_id);
-
+                if !response.has_more {
                     // Final group of messages
                     if let Some(responder) = self.handle_map.remove(&response.request_id) {
                         let grouped_responses = self.response_vec_map.remove(&response.request_id)
@@ -83,8 +67,7 @@ impl RithmicRequestHandler {
                 }
             }
         }
-    }
-}
+    }}
 
 impl Default for RithmicRequestHandler {
     fn default() -> Self {
