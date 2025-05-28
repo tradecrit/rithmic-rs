@@ -57,6 +57,11 @@ pub enum TickerPlantCommand {
         request_type: Request,
         response_sender: oneshot::Sender<Result<Vec<RithmicResponse>, String>>,
     },
+    RequestDepthByOrderSnapshot {
+        symbol: String,
+        exchange: String,
+        response_sender: oneshot::Sender<Result<Vec<RithmicResponse>, String>>,
+    }
 }
 
 /// The RithmicTickerPlant provides access to real-time market data.
@@ -247,48 +252,6 @@ impl PlantActor for TickerPlant {
         }
     }
 
-    async fn handle_rithmic_message(
-        &mut self,
-        message: Result<Message, Error>,
-    ) -> Result<bool, ()> {
-        let mut stop = false;
-
-        match message {
-            Ok(Message::Close(frame)) => {
-                event!(
-                    Level::INFO,
-                    "ticker_plant received close frame: {:?}",
-                    frame
-                );
-
-                stop = true;
-            }
-            Ok(Message::Binary(data)) => {
-                let response = self.rithmic_receiver_api.buf_to_message(data).unwrap();
-
-                if response.is_update {
-                    self.subscription_sender.send(response).unwrap();
-                } else {
-                    self.request_handler.handle_response(response);
-                }
-            }
-            Err(Error::ConnectionClosed) => {
-                event!(Level::INFO, "ticker_plant connection closed");
-
-                stop = true;
-            }
-            _ => {
-                event!(
-                    Level::WARN,
-                    "ticker_plant received unknown message {:?}",
-                    message
-                );
-            }
-        }
-
-        Ok(stop)
-    }
-
     async fn handle_command(&mut self, command: TickerPlantCommand) {
         match command {
             TickerPlantCommand::Close => {
@@ -401,7 +364,69 @@ impl PlantActor for TickerPlant {
                     .await
                     .unwrap();
             }
+            TickerPlantCommand::RequestDepthByOrderSnapshot {
+                symbol,
+                exchange,
+                response_sender
+            } => {
+                let (sub_buf, id) = self.rithmic_sender_api.request_depth_by_order_snapshot(
+                    &symbol,
+                    &exchange,
+                );
+
+                self.request_handler.register_request(RithmicRequest {
+                    request_id: id,
+                    responder: response_sender,
+                });
+
+                self.rithmic_sender
+                    .send(Message::Binary(sub_buf.into()))
+                    .await
+                    .unwrap();
+            }
         }
+    }
+
+    async fn handle_rithmic_message(
+        &mut self,
+        message: Result<Message, Error>,
+    ) -> Result<bool, ()> {
+        let mut stop = false;
+
+        match message {
+            Ok(Message::Close(frame)) => {
+                event!(
+                    Level::INFO,
+                    "ticker_plant received close frame: {:?}",
+                    frame
+                );
+
+                stop = true;
+            }
+            Ok(Message::Binary(data)) => {
+                let response = self.rithmic_receiver_api.buf_to_message(data).unwrap();
+
+                if response.is_update {
+                    self.subscription_sender.send(response).unwrap();
+                } else {
+                    self.request_handler.handle_response(response);
+                }
+            }
+            Err(Error::ConnectionClosed) => {
+                event!(Level::INFO, "ticker_plant connection closed");
+
+                stop = true;
+            }
+            _ => {
+                event!(
+                    Level::WARN,
+                    "ticker_plant received unknown message {:?}",
+                    message
+                );
+            }
+        }
+
+        Ok(stop)
     }
 }
 
@@ -520,7 +545,27 @@ impl RithmicTickerPlantHandle {
 
         let _ = self.sender.send(command).await;
 
-        Ok(rx.await.unwrap().unwrap().remove(0))
+        Ok(rx.await.unwrap()?.remove(0))
+    }
+
+    pub async fn request_depth_by_order_snapshot(
+        &self,
+        symbol: &str,
+        exchange: &str,
+    ) -> Result<Vec<RithmicResponse>, String> {
+        let (tx, rx) = oneshot::channel::<Result<Vec<RithmicResponse>, String>>();
+
+        let command = TickerPlantCommand::RequestDepthByOrderSnapshot {
+            symbol: symbol.to_string(),
+            exchange: exchange.to_string(),
+            response_sender: tx,
+        };
+
+        let _ = self.sender.send(command).await;
+
+        let responses = rx.await.unwrap()?; // fully collected
+
+        Ok(responses)
     }
 }
 
