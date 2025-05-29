@@ -16,6 +16,7 @@ pub struct RithmicRequestHandler {
     response_vec_map: HashMap<String, Vec<RithmicResponse>>,
 }
 
+
 impl RithmicRequestHandler {
     pub fn new() -> Self {
         Self {
@@ -32,6 +33,7 @@ impl RithmicRequestHandler {
     pub fn handle_response(&mut self, response: RithmicResponse) {
         match response.message {
             RithmicMessage::ResponseHeartbeat(_) => {}
+            RithmicMessage::ResponseDepthByOrderSnapshot(_) => {}
             _ => {
                 // Case 1: Single-message response
                 if !response.multi_response {
